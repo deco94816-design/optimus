@@ -4,9 +4,27 @@ A feature-rich Telegram Casino Bot with multiple games, crypto payments, referra
 
 ---
 
+## ☁️ One-Click Deploy to Heroku
+
+[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/deco94816-design/optimus-)
+
+> Click the button above → Enter your **Bot Token** → Deploy. That's it!
+
+---
+
 ## 🚀 Quick Deploy
 
-### Option 1: Docker (Recommended)
+### Option 1: Heroku (Easiest)
+```bash
+# Or deploy via CLI:
+heroku login
+heroku create your-bot-name
+git push heroku main
+heroku ps:scale worker=1
+heroku config:set BOT_TOKEN=your_token_here
+```
+
+### Option 2: Docker
 ```bash
 git clone https://github.com/deco94816-design/optimus-.git
 cd optimus-
@@ -15,7 +33,7 @@ cp .env.example .env
 docker-compose up -d
 ```
 
-### Option 2: Python (Manual)
+### Option 3: Python (Manual)
 ```bash
 git clone https://github.com/deco94816-design/optimus-.git
 cd optimus-
@@ -30,7 +48,7 @@ pip install -r requirements.txt
 python "casino v5 (1).py"
 ```
 
-### Option 3: Windows One-Click
+### Option 4: Windows One-Click
 ```
 Double-click run_bot.bat
 ```
