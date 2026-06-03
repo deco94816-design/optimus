@@ -1,0 +1,43 @@
+@echo off
+REM Telegram Casino Bot Startup Script
+REM ===================================
+
+echo.
+echo Starting Telegram Casino Bot...
+echo.
+
+REM Navigate to the bot directory
+cd /d "%~dp0"
+
+REM Check if virtual environment exists
+if not exist ".venv" (
+    echo Creating virtual environment...
+    python -m venv .venv
+)
+
+REM Activate virtual environment
+call .venv\Scripts\activate.bat
+
+REM Check dependencies
+echo Checking dependencies...
+pip install python-telegram-bot httpx Pillow -q 2>nul
+
+REM Run the bot
+echo.
+echo ========================================
+echo Bot Token: 8062106287:AAHsF_Goc_ObrYgqNCKr0dyjZqJSPrKkb9I
+echo ========================================
+echo.
+
+python "casino v5 (1).py"
+
+REM If bot exits, show exit code
+if errorlevel 1 (
+    echo.
+    echo Error: Bot exited with error code %errorlevel%
+    pause
+) else (
+    echo.
+    echo Bot stopped successfully.
+    pause
+)
