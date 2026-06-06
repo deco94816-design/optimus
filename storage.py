@@ -62,6 +62,17 @@ class Database:
     def _init_schema(self, conn: sqlite3.Connection) -> None:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS deposits (
+                deposit_id TEXT PRIMARY KEY,
+                user_id INTEGER,
+                coin TEXT,
+                network TEXT,
+                address TEXT,
+                amount_usd REAL DEFAULT 0,
+                tx_hash TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT

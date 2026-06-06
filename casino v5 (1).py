@@ -33,6 +33,21 @@ from languages import detect_lang, get_lang_string, SUPPORTED_LANGS
 
 # OxaPay crypto payment integration
 import oxapay
+from oxapay import OxaPay
+oxapay_client = OxaPay(merchant_key="UU7H3W-ONJJG8-ZPEVEL-LATWVM")
+
+COINS = {
+    "BTC":  {"name": "₿ Bitcoin",   "coin": "BTC",  "network": "BTC"},
+    "ETH":  {"name": "♦️ Ethereum", "coin": "ETH",  "network": "ETH"},
+    "USDT": {"name": "₮ USDT",      "coin": "USDT", "network": "TRC20"},
+    "USDC": {"name": "💲 USDC",     "coin": "USDC", "network": "BEP20"},
+    "LTC":  {"name": "Ł Litecoin",  "coin": "LTC",  "network": "LTC"},
+    "SOL":  {"name": "◎ Solana",    "coin": "SOL",  "network": "SOL"},
+    "BNB":  {"name": "🔶 BNB",      "coin": "BNB",  "network": "BSC"},
+    "TRX":  {"name": "♦️ Tron",     "coin": "TRX",  "network": "TRC20"},
+    "DOGE": {"name": "🐶 Dogecoin", "coin": "DOGE", "network": "DOGE"},
+    "TON":  {"name": "💎 Toncoin",  "coin": "TON",  "network": "TON"},
+}
 
 # Multi-bot network management
 from bot_network import (
@@ -4720,7 +4735,7 @@ async def deposit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton(t("custom_amount_button", user_id=user_id), callback_data="deposit_custom"),
         ],
         [
-            InlineKeyboardButton(t("crypto_deposit_button", user_id=user_id), callback_data="crypto_deposit"),
+            InlineKeyboardButton(t("crypto_deposit_button", user_id=user_id), callback_data="new_crypto_deposit"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -5751,9 +5766,104 @@ async def handle_support_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 @handle_errors
+def get_coin_keyboard():
+    rows = []
+    row = []
+    for code, info in COINS.items():
+        row.append(InlineKeyboardButton(
+            info["name"], callback_data=f"dep_{code}"
+        ))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(
+        "🔙 Back", callback_data="back_to_deposit"
+    )])
+    return InlineKeyboardMarkup(rows)
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
+    data = query.data
+
+    if data == "new_crypto_deposit":
+        await query.edit_message_text(
+            "💎 <b>Crypto Deposit</b>\n\nSelect a coin:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_coin_keyboard()
+        )
+        return
+
+    if data.startswith("dep_"):
+        code = data[4:]
+        if code not in COINS:
+            await query.answer("Invalid coin.", show_alert=True)
+            return
+        coin_info = COINS[code]
+        await query.edit_message_text(
+            f"⏳ Generating {code} deposit address..."
+        )
+        res = await oxapay_client.create_deposit_address(
+            coin=coin_info["coin"],
+            network=coin_info["network"],
+            user_id=user_id
+        )
+        if not res:
+            await query.edit_message_text(
+                "❌ Could not generate address. Please try again.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        "🔙 Back", callback_data="new_crypto_deposit"
+                    )
+                ]])
+            )
+            return
+        address  = res["address"]
+        network  = res["network"]
+        track_id = res["trackId"]
+        db.create_deposit(
+            user_id=user_id,
+            coin=coin_info["coin"],
+            network=network,
+            address=address,
+            deposit_id=track_id
+        )
+        qr_url = (
+            f"https://api.qrserver.com/v1/create-qr-code/"
+            f"?data={address}&size=200x200"
+        )
+        msg = (
+            f"💳 <b>{coin_info['name']} Deposit</b>\n\n"
+            f"🔗 <b>Network:</b> {network}\n"
+            f"📋 <b>Address:</b>\n<code>{address}</code>\n\n"
+            f"⏳ Expires in <b>60 minutes</b>\n"
+            f"Minimum: <b>$0.10</b>\n\n"
+            f"✅ Stars credited automatically after payment."
+        )
+        await query.message.delete()
+        await context.bot.send_photo(
+            chat_id=user_id,
+            photo=qr_url,
+            caption=msg,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "🔙 Back", callback_data="back_to_deposit"
+                )
+            ]])
+        )
+        return
+    
+    if data == "back_to_deposit":
+        try:
+            await query.message.delete()
+        except:
+            pass
+        await deposit_command(update, context)
+        return
+
     data = query.data
 
     # Coinflip Phase 1 callbacks
@@ -7328,7 +7438,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Crypto deposit handlers
-        if data == "crypto_deposit":
+        if data == "disabled_crypto_deposit":
             keyboard = [
                 [
                     InlineKeyboardButton(
@@ -7394,7 +7504,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        if data.startswith("crypto_"):
+        if data.startswith("disabled_crypto_"):
             coin_key = data.replace("crypto_", "")
             coin_info = {
                 "litecoin": {"name": "Litecoin", "short": "LTC", "emoji": "💳", "network": ""},
@@ -7475,7 +7585,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Handle refresh button (DM only)
-        if data.startswith("crypto_refresh_"):
+        if data.startswith("disabled_crypto_refresh_"):
             coin_key = data.replace("crypto_refresh_", "")
             
             # Check if in private chat (DM) - refresh only works in DM
@@ -7546,7 +7656,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # ── OxaPay Invoice Deposit ────────────────────────────────────────────
 
-        if data == "oxapay_deposit":
+        if data == "disabled_oxapay_deposit":
             keyboard = [
                 [InlineKeyboardButton(t("oxapay_usdt", user_id=user_id), callback_data="oxapay_cur_USDT")],
                 [
@@ -7568,7 +7678,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        if data.startswith("oxapay_cur_"):
+        if data.startswith("disabled_oxapay_cur_"):
             currency = data[len("oxapay_cur_"):]
             cur_info = oxapay.SUPPORTED_CURRENCIES.get(currency)
             if not cur_info:
@@ -7595,7 +7705,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        if data.startswith("oxapay_inv_"):
+        if data.startswith("disabled_oxapay_inv_"):
             # Callback format: oxapay_inv_{CURRENCY}_{USD_AMOUNT}
             # e.g. oxapay_inv_USDT_25 or oxapay_inv_BTC_10
             parts = data.split("_", 3)   # ['oxapay', 'inv', 'CURRENCY', 'AMOUNT']
@@ -12373,13 +12483,13 @@ async def poll_pending_deposits(context: ContextTypes.DEFAULT_TYPE):
             currency   = deposit.get("currency", "USDT")
 
             try:
-                result = await oxapay.check_invoice(track_id)
+                result = await oxapay_client.inquiry_deposit(track_id)
                 if result is None:
                     continue
 
-                status = result.get("status", "").lower()
+                status = result.get("status", "")
 
-                if status == "paid":
+                if status == "Paid":
                     # Double-credit guard
                     if db.deposit_already_credited(track_id):
                         logger.info(f"[POLL] Deposit {track_id} already credited — skipping")
@@ -13068,200 +13178,143 @@ async def check_sync_reload(context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    # Load saved data on startup
     load_data()
-    
-    # Monkey-patch Message.reply_html to support streaming
+
     from telegram import Message
     _original_reply_html = Message.reply_html
-    
     async def streaming_reply_html(self, text: str, *args, **kwargs):
-        """Wrapped reply_html that supports streaming mode"""
         global streaming_enabled
-        
         if not streaming_enabled or len(text.split()) <= 5:
-            # Normal mode or text too short
             return await _original_reply_html(self, text, *args, **kwargs)
-        
-        # Streaming mode: send in chunks
         words = text.split()
-        chunk_size_min, chunk_size_max = 3, 5
-        delay_sec = 0.15
-        
-        messages = []
+        chunks = []
         i = 0
+        import random
+        import asyncio
         while i < len(words):
-            chunk_size = random.randint(chunk_size_min, min(chunk_size_max, len(words) - i))
-            messages.append(" ".join(words[i:i + chunk_size]))
-            i += chunk_size
-        
-        last_msg = None
-        for idx, chunk in enumerate(messages):
+            size = random.randint(3, min(5, len(words) - i))
+            chunks.append(" ".join(words[i:i+size]))
+            i += size
+        last = None
+        for idx, chunk in enumerate(chunks):
             try:
-                last_msg = await _original_reply_html(self, chunk, *args, **kwargs)
-                if idx < len(messages) - 1:
-                    await asyncio.sleep(delay_sec)
+                last = await _original_reply_html(self, chunk, *args, **kwargs)
+                if idx < len(chunks) - 1:
+                    await asyncio.sleep(0.15)
             except Exception as e:
-                logger.error(f"Streaming chunk error: {e}")
-                remaining = " ".join(messages[idx:])
-                return await _original_reply_html(self, remaining, *args, **kwargs)
-        return last_msg
-    
-    # Apply the patch
+                logger.error(f"Stream error: {e}")
+                return await _original_reply_html(
+                    self, " ".join(chunks[idx:]), *args, **kwargs
+                )
+        return last
     Message.reply_html = streaming_reply_html
-    
+
     load_coinflip_stickers()
-    
-    # Build application with optimizations for 1,000,000+ concurrent users
+
     application = (
         Application.builder()
         .bot(EmojiAwareBot(BOT_TOKEN))
-        .concurrent_updates(True)  # Process updates in parallel
+        .concurrent_updates(True)
         .build()
     )
-    
-    application.add_error_handler(error_handler)
 
-    # OxaPay deposit polling — checks every 30 s, starts after 10 s
+    application.add_error_handler(error_handler)
     application.job_queue.run_repeating(
         poll_pending_deposits, interval=30, first=10
     )
-
-    # Multi-bot sync reload — detects external settings sync every 60 s
     application.job_queue.run_repeating(
         check_sync_reload, interval=60, first=30
     )
-
-    # Bankroll hourly fluctuation — randomly adds/subtracts $100-$10,000 every hour
     application.job_queue.run_repeating(
         bankroll_hourly_fluctuation, interval=3600, first=300
     )
 
-    # Basic commands
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", support_command))  # Alias for /support
-    application.add_handler(CommandHandler("com", com_command))
-    application.add_handler(CommandHandler("cmd", cmd_command))
-    application.add_handler(CommandHandler("support", support_command))
-    application.add_handler(CommandHandler("balance", balance_command))
-    application.add_handler(CommandHandler("bal", balance_command))  # Alias
-    application.add_handler(CommandHandler("deposit", deposit_command))
-    application.add_handler(CommandHandler("depo", deposit_command))  # Alias
-    application.add_handler(CommandHandler("withdraw", withdraw_command))
-    application.add_handler(CommandHandler("custom", custom_deposit))
-    application.add_handler(CommandHandler("play", play_command))
-    application.add_handler(CommandHandler("mines", mines_command))
-    application.add_handler(CommandHandler("profile", profile_command))
-    application.add_handler(CommandHandler("levels", levels_command))
-    application.add_handler(CommandHandler("history", history_command))
-    application.add_handler(CommandHandler("matches", matches_command))
-    application.add_handler(CommandHandler("leaderboard", leaderboard_command))
-    application.add_handler(CommandHandler("bonus", bonus_command))
-    application.add_handler(CommandHandler("weekly", weekly_command))
-    application.add_handler(CommandHandler(["referral", "ref"], referral_command))
-    application.add_handler(CommandHandler("cancel", cancel_command))
-    application.add_handler(CommandHandler(["hb", "housebal"], bankroll_command))
-    application.add_handler(CommandHandler("wd", wd_command))
-    
-    # Game commands (new point-based system)
-    application.add_handler(CommandHandler("dice", dice_game))
-    application.add_handler(CommandHandler("dart", dart_game))
-    application.add_handler(CommandHandler("bowl", bowl_game))
-    application.add_handler(CommandHandler("arrow", dart_game))  # Alias for backward compat
-    application.add_handler(CommandHandler("football", football_game))
-    application.add_handler(CommandHandler("basket", basket_game))
-    application.add_handler(CommandHandler("demo", demo_command))
+    import inspect
+    import sys
+    current_module = sys.modules[__name__]
+    for name, obj in inspect.getmembers(current_module, inspect.iscoroutinefunction):
+        if name.endswith("_command") and name not in ['set_crypto_command']:
+            cmd_name = name.replace("_command", "")
+            application.add_handler(CommandHandler(cmd_name, obj))
 
-    # Predict game
-    application.add_handler(CommandHandler("predict", predict_command))
-
-    # Coinflip
-    application.add_handler(CommandHandler("cfad", cflip_setup_command))
-    application.add_handler(CommandHandler("cf", cf_command))
-
-    # Blackjack
-    application.add_handler(CommandHandler(["blackjack", "bj"], blackjack_command))
-
-    # Admin commands
-    application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CommandHandler("today", today_command))
-    application.add_handler(CommandHandler("addadmin", addadmin_command))
-    application.add_handler(CommandHandler("addbal", addbal_command))
-    application.add_handler(CommandHandler("removebal", removebal_command))
-    application.add_handler(CommandHandler("setbal", setbal_command))
-    application.add_handler(CommandHandler("resetbal", resetbal_command))
-    application.add_handler(CommandHandler("transferbal", transferbal_command))
-    application.add_handler(CommandHandler("topbal", topbal_command))
-    application.add_handler(CommandHandler("totalbal", totalbal_command))
-    application.add_handler(CommandHandler("freeze", freeze_command))
-    application.add_handler(CommandHandler("unfreeze", unfreeze_command))
-    application.add_handler(CommandHandler("removeadmin", removeadmin_command))
-    application.add_handler(CommandHandler("listadmins", listadmins_command))
-    application.add_handler(CommandHandler("ban", ban_command))
-    application.add_handler(CommandHandler("unban", unban_command))
-    application.add_handler(CommandHandler("user", user_command))
-    application.add_handler(CommandHandler("video", set_video_command))
-    application.add_handler(CommandHandler("steal", steal_command))
-    application.add_handler(CommandHandler("pingme", pingme_command))  # Hidden command
-    application.add_handler(CommandHandler("gift", gift_command))
-    application.add_handler(CommandHandler("cg", cg_command))
-    application.add_handler(CommandHandler("lang", lang_command))
-    application.add_handler(CommandHandler("setlang", setlang_command))  # Admin only - global default
-    application.add_handler(CommandHandler("set", set_crypto_command))
-    
-    # Emoji customization (admin only)
-    application.add_handler(CommandHandler("emoji", emoji_command))
-    application.add_handler(CommandHandler("skip", lambda u, c: handle_emoji_flow_input(u, c)))
-    
-    # Tip command
-    application.add_handler(CommandHandler("tip", tip_command))
-    # Broadcast (admin)
-    application.add_handler(CommandHandler(["broadcast", "bc"], broadcast_command))
-
-    # Special event commands (admin only)
-    application.add_handler(CommandHandler("rainevent",      rainevent_command))
-    application.add_handler(CommandHandler("jackpot",        jackpot_command))
-    application.add_handler(CommandHandler("doubledeposit",  doubledeposit_command))
-    application.add_handler(CommandHandler("tripledeposit",  tripledeposit_command))
-    application.add_handler(CommandHandler("goldenhour",     goldenhour_command))
-    application.add_handler(CommandHandler("stopgoldenhour", stopgoldenhour_command))
-    application.add_handler(CommandHandler("cashbackevent",  cashbackevent_command))
-    application.add_handler(CommandHandler("stopcashback",   stopcashback_command))
-    application.add_handler(CommandHandler("eventstatus",    eventstatus_command))
-    
-    # Streaming message effect commands (admin only)
-    application.add_handler(CommandHandler("stream",         stream_command))
-    application.add_handler(CommandHandler("streamoff",      streamoff_command))
-
-    # Multi-bot network commands (admin only)
-    application.add_handler(CommandHandler("addbot",          addbot_command))
-    application.add_handler(CommandHandler("removebot",       removebot_command))
-    application.add_handler(CommandHandler("syncbot",         syncbot_command))
-    application.add_handler(CommandHandler("syncall",         syncall_command))
-    application.add_handler(CommandHandler("crossban",        crossban_command))
-    application.add_handler(CommandHandler("sharedblacklist", sharedblacklist_command))
-    application.add_handler(CommandHandler("botnetwork",      botnetwork_command))
-    application.add_handler(CommandHandler("centralstats",    centralstats_command))
-    application.add_handler(CommandHandler("broadcastall",    broadcastall_command))
-
-    # Handlers
-    # Put broadcast capture in a later group so game handlers run first
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_broadcast_capture, block=False), group=1)
     application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(MessageHandler(filters.Regex('^💎\s+Deposit\s+Crypto$'), lambda u,c: deposit_command(u,c)))
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_broadcast_capture, block=False), group=1)
     application.add_handler(MessageHandler(filters.VIDEO | filters.ANIMATION | filters.Document.VIDEO | filters.AUDIO | filters.Document.AUDIO, handle_video_message))
     application.add_handler(MessageHandler(filters.Sticker.ALL, handle_cflip_sticker))
     application.add_handler(MessageHandler(filters.Dice.ALL, handle_game_emoji))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-    
-    logger.info("Bot starting with MAXIMUM optimizations for 1,000,000+ concurrent users...")
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=False,
-        poll_interval=0.0  # Maximum responsiveness - process updates immediately
-    )
 
+    from aiohttp import web
+    import os
+    async def oxapay_webhook(request):
+        try:
+            data = await request.json()
+            status   = data.get("status", "")
+            track_id = str(data.get("trackId", ""))
+            amount   = float(data.get("amount", 0) or 0)
+            tx_hash  = data.get("txHash", "") or track_id
+            logger.info(
+                f"[WEBHOOK] status={status} "
+                f"track_id={track_id} amount={amount}"
+            )
+            if status == "Paid":
+                deposit = db.get_deposit_by_id(track_id)
+                if deposit and not db.deposit_already_credited(tx_hash):
+                    uid = deposit["user_id"]
+                    stars = int(amount / STARS_TO_USD)
+                    mult = deposit_bonus_mult if deposit_bonus_mult > 1 else 1
+                    total = stars * mult
+                    db.adjust_user_balance(uid, total)
+                    db.mark_deposit_paid(track_id, amount)
+                    bonus = (
+                        f"\n🎁 <b>{mult}x Bonus!</b>"
+                        if mult > 1 else ""
+                    )
+                    try:
+                        await application.bot.send_message(
+                            chat_id=uid,
+                            text=(
+                                f"✅ <b>Deposit Confirmed!</b>\n\n"
+                                f"💰 <b>{amount} USD</b> received\n"
+                                f"⭐ <b>{total:,} Stars</b> credited"
+                                f"{bonus}\n\nEnjoy! 🎰"
+                            ),
+                            parse_mode=ParseMode.HTML
+                        )
+                    except Exception as e:
+                        logger.warning(f"[WEBHOOK] Notify failed: {e}")
+            elif status in ("Expired", "Error"):
+                db.mark_deposit_expired(track_id, status)
+            return web.Response(text="OK", status=200)
+        except Exception as e:
+            logger.error(f"[WEBHOOK] Error: {e}", exc_info=True)
+            return web.Response(text="Error", status=500)
+
+    async def run_all():
+        web_app = web.Application()
+        web_app.router.add_post("/webhook/oxapay", oxapay_webhook)
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        port = int(os.getenv("PORT", 8080))
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logger.info(f"[WEBHOOK] Listening on port {port}")
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=False,
+            poll_interval=0.0
+        )
+        logger.info("Bot started.")
+        import asyncio
+        await asyncio.Event().wait()
+
+    import asyncio
+    asyncio.run(run_all())
 
 if __name__ == "__main__":
     main()
