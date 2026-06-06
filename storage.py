@@ -719,6 +719,15 @@ class Database:
             )
             conn.commit()
 
+    def get_deposit_by_id(self, deposit_id: str):
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                "SELECT * FROM deposits WHERE deposit_id=?",
+                (deposit_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
     def get_pending_deposits(self) -> list[dict[str, Any]]:
         with self._lock:
             conn = self.get_db_connection()
