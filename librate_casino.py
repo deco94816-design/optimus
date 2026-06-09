@@ -10540,6 +10540,7 @@ async def cmd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /profile, /levels, /history, /matches, /leaderboard\n"
         "• /bonus, /weekly — Bonuses\n"
         "• /referral or /ref — Referrals\n"
+        "• /race or /raffle — Join active race/raffle\n"
         "• /tip — Tip stars\n\n"
         "<b>Other</b>\n"
         "• /hb or /housebal — House bankroll (public view)\n"
@@ -12179,6 +12180,7 @@ def main():
     # Basic commands
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("race", race_command))
+    application.add_handler(CommandHandler("raffle", race_command))
     application.add_handler(CommandHandler("help", support_command))  # Alias for /support
     application.add_handler(CommandHandler("com", com_command))
     application.add_handler(CommandHandler("cmd", cmd_command))
