@@ -38,9 +38,9 @@ from race import (
 # ─── Admin Guard ─────────────────────────────────────────────────────────────
 
 async def _is_admin(update: Update) -> bool:
-    from storage import db as _db
+    from storage import db
     user_id = update.effective_user.id
-    if _db.is_admin(user_id):
+    if db.is_admin(user_id):
         return True
     await update.message.reply_text("⛔ Admin only.")
     return False
@@ -50,6 +50,7 @@ async def _is_admin(update: Update) -> bool:
 
 async def cmd_race_prize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Set prize pool for current active race."""
+    from storage import db
     if not await _is_admin(update):
         return
 
@@ -84,6 +85,7 @@ async def cmd_race_prize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def cmd_race_end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Manually set end date of current race."""
+    from storage import db
     if not await _is_admin(update):
         return
 
@@ -134,6 +136,7 @@ async def cmd_race_board(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     Usage: /raceboard        (page 1)
            /raceboard 3      (page 3)
     """
+    from storage import db
     if not await _is_admin(update):
         return
 
@@ -193,6 +196,7 @@ async def cmd_race_seed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     /raceseed add <name> <amount>
     /raceseed edit <rank 1-11> <name> <amount>
     """
+    from storage import db
     if not await _is_admin(update):
         return
 
@@ -331,6 +335,7 @@ async def cmd_race_seed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def cmd_race_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """End current race immediately and start a fresh 30-day race."""
+    from storage import db
     if not await _is_admin(update):
         return
 
