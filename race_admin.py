@@ -39,7 +39,7 @@ from race import (
 
 async def _is_admin(update: Update) -> bool:
     user_id = update.effective_user.id
-    if db.is_admin(user_id):
+    if user_id in db.get_all_admins():
         return True
     await update.message.reply_text("⛔ Admin only.")
     return False
