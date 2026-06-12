@@ -144,12 +144,36 @@ class Database:
                 credited INTEGER NOT NULL DEFAULT 0,
                 created TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS claw_packs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pack_name TEXT UNIQUE,
+                title TEXT,
+                added_by INTEGER,
+                created_at TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS claw_stickers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pack_id INTEGER,
+                file_id TEXT,
+                emoji TEXT,
+                sticker_position INTEGER,
+                FOREIGN KEY(pack_id) REFERENCES claw_packs(id)
+            );
             """
         )
         try:
             conn.execute("ALTER TABLE users ADD COLUMN crypto_balance REAL NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
             pass  # column likely exists
+        try:
+            conn.execute("ALTER TABLE transactions ADD COLUMN track_id TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+            
+        try:
+            conn.execute("ALTER TABLE claw_stickers ADD COLUMN sticker_position INTEGER")
+        except sqlite3.OperationalError:
+            pass # Column already exists
         conn.commit()
 
     # --- settings ---
@@ -676,5 +700,59 @@ class Database:
             r = conn.execute("SELECT crypto_balance FROM users WHERE user_id=?", (user_id,)).fetchone()
             return float(r[0]) if r else 0.0
 
+
+    # --- claw machine ---
+    def add_claw_pack(self, pack_name: str, title: str, added_by: int) -> int:
+        with self._lock:
+            conn = self.get_db_connection()
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO claw_packs (pack_name, title, added_by, created_at) VALUES (?, ?, ?, ?)",
+                (pack_name, title, added_by, datetime.now().isoformat())
+            )
+            if cur.rowcount == 0:
+                # Pack already exists
+                cur = conn.execute("SELECT id FROM claw_packs WHERE pack_name = ?", (pack_name,))
+            pack_id = cur.lastrowid if cur.lastrowid else cur.fetchone()[0]
+            conn.commit()
+            return pack_id
+
+    def add_claw_stickers(self, pack_id: int, stickers: list[tuple[str, str, int]]) -> None:
+        with self._lock:
+            conn = self.get_db_connection()
+            # Clear old stickers for this pack if any
+            conn.execute("DELETE FROM claw_stickers WHERE pack_id = ?", (pack_id,))
+            conn.executemany(
+                "INSERT INTO claw_stickers (pack_id, file_id, emoji, sticker_position) VALUES (?, ?, ?, ?)",
+                [(pack_id, file_id, emoji, pos) for file_id, emoji, pos in stickers]
+            )
+            conn.commit()
+
+    def get_all_claw_stickers(self) -> list[tuple[str, int]]:
+        with self._lock:
+            conn = self.get_db_connection()
+            cur = conn.execute("SELECT file_id, sticker_position FROM claw_stickers")
+            return [(row["file_id"], row["sticker_position"]) for row in cur.fetchall()]
+
+    def get_claw_packs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            conn = self.get_db_connection()
+            cur = conn.execute("SELECT id, pack_name, title, added_by, created_at FROM claw_packs")
+            packs = []
+            for row in cur.fetchall():
+                packs.append({
+                    "id": row["id"],
+                    "pack_name": row["pack_name"],
+                    "title": row["title"],
+                    "added_by": row["added_by"],
+                    "created_at": row["created_at"]
+                })
+            return packs
+
+    def delete_claw_pack(self, pack_id: int) -> None:
+        with self._lock:
+            conn = self.get_db_connection()
+            conn.execute("DELETE FROM claw_stickers WHERE pack_id = ?", (pack_id,))
+            conn.execute("DELETE FROM claw_packs WHERE id = ?", (pack_id,))
+            conn.commit()
 
 db = Database()

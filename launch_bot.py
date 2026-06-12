@@ -19,7 +19,11 @@ def check_dependencies():
     dependencies = {
         'telegram': 'python-telegram-bot',
         'httpx': 'httpx',
-        'PIL': 'Pillow'
+        'PIL': 'Pillow',
+        'aiohttp': 'aiohttp',
+        'fastapi': 'fastapi',
+        'uvicorn': 'uvicorn',
+        'dotenv': 'python-dotenv'
     }
     
     missing = []
@@ -45,7 +49,7 @@ def verify_files():
     print("=" * 50)
     
     required_files = [
-        'casino v5 (1).py',
+        'librate_casino.py',
         'storage.py',
         'bot_network.py',
         'languages.py'
@@ -69,9 +73,9 @@ def verify_token():
     
     # Read the bot file to check token
     try:
-        with open('casino v5 (1).py', 'r', encoding='utf-8') as f:
+        with open('librate_casino.py', 'r', encoding='utf-8') as f:
             content = f.read()
-            if '8062106287:AAHuFUn04LihAfyvF8mRCAz7lg_BJRZECCg' in content:
+            if '8062106287:AAFYwGhOGugldkEc9QSg4RzD8yPB-w3_fCY' in content:
                 print("✓ Bot token configured correctly")
                 return True
             else:
@@ -119,9 +123,9 @@ def main():
     
     try:
         # Import and run the bot
-        # import casino v5 (1)  # This won't work due to filename
+        # import librate_casino  # This won't work due to filename
         # Instead, execute the file directly
-        exec(open('casino v5 (1).py').read())
+        exec(open('librate_casino.py').read())
     except KeyboardInterrupt:
         print("\n\nBot stopped by user")
         return 0

@@ -49,7 +49,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "8062106287:AAHuFUn04LihAfyvF8mRCAz7lg_BJRZECCg".strip()
+BOT_TOKEN = "8062106287:AAFYwGhOGugldkEc9QSg4RzD8yPB-w3_fCY".strip()
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable is required")
 PROVIDER_TOKEN = ""
@@ -5792,6 +5792,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
+        # Handle claw machine callbacks
+        if data.startswith("claw_"):
+            import games.claw as claw
+            await claw.handle_claw_callback(update, context)
+            return
+
         # Handle language selection callbacks
         if data.startswith("set_lang_"):
             new_lang = data.replace("set_lang_", "")
@@ -9813,6 +9819,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     text = (message.text or "").strip()
     
+    # Check claw sticker admin input
+    import games.claw as claw
+    handled = await claw.handle_claw_sticker_input(update, context)
+    if handled:
+        return
+    
     # Handle emoji replacement flow (admin only) — must be checked before other handlers
     if user_id in emoji_replace_flow:
         consumed = await handle_emoji_flow_input(update, context)
@@ -12108,6 +12120,8 @@ async def check_sync_reload(context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"[SYNC] Reload check failed: {e}")
 
 
+import games.claw as claw
+
 def main():
     # Load saved data on startup
     load_data()
@@ -12282,6 +12296,12 @@ def main():
     application.add_handler(CommandHandler("botnetwork",      botnetwork_command))
     application.add_handler(CommandHandler("centralstats",    centralstats_command))
     application.add_handler(CommandHandler("broadcastall",    broadcastall_command))
+
+    # Claw machine game
+    application.add_handler(CommandHandler("claw", claw.claw_command))
+    application.add_handler(CommandHandler("clawad", claw.clawad_command))
+    application.add_handler(CommandHandler("clawpacks", claw.clawpacks_command))
+    application.add_handler(CommandHandler("clawdel", claw.clawdel_command))
 
     # Handlers
     # Put broadcast capture in a later group so game handlers run first

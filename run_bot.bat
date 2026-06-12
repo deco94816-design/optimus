@@ -20,16 +20,16 @@ call .venv\Scripts\activate.bat
 
 REM Check dependencies
 echo Checking dependencies...
-pip install "python-telegram-bot[job-queue]" httpx Pillow -q 2>nul
+pip install "python-telegram-bot[job-queue]" httpx Pillow aiohttp fastapi uvicorn python-dotenv -q 2>nul
 
 REM Run the bot
 echo.
 echo ========================================
-echo Bot Token: 8062106287:AAHsF_Goc_ObrYgqNCKr0dyjZqJSPrKkb9I
+echo Bot Token: 8062106287:AAFYwGhOGugldkEc9QSg4RzD8yPB-w3_fCY
 echo ========================================
 echo.
 
-python "casino v5 (1).py"
+python "librate_casino.py"
 
 REM If bot exits, show exit code
 if errorlevel 1 (

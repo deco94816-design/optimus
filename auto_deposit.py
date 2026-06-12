@@ -403,6 +403,6 @@ def setup_deposit_module(application: Application) -> None:
 
         t = threading.Thread(target=_run_uvicorn, daemon=True)
         t.start()
-        print(f"[auto_deposit] ✅ Webhook server listening on :{WEBHOOK_PORT}")
+        print(f"[auto_deposit] Webhook server listening on :{WEBHOOK_PORT}")
 
     application.job_queue.run_once(_init_job, when=3, name="oxapay_init")
