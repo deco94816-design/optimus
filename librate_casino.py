@@ -12121,6 +12121,7 @@ async def check_sync_reload(context: ContextTypes.DEFAULT_TYPE):
 
 
 import games.claw as claw
+import games.roulette as roulette
 
 def main():
     # Load saved data on startup
@@ -12302,6 +12303,9 @@ def main():
     application.add_handler(CommandHandler("clawad", claw.clawad_command))
     application.add_handler(CommandHandler("clawpacks", claw.clawpacks_command))
     application.add_handler(CommandHandler("clawdel", claw.clawdel_command))
+
+    # Roulette game
+    roulette.register_handlers(application)
 
     # Handlers
     # Put broadcast capture in a later group so game handlers run first
