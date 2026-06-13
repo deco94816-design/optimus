@@ -144,6 +144,29 @@ class Database:
                 credited INTEGER NOT NULL DEFAULT 0,
                 created TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS pvp_matches (
+                match_id TEXT PRIMARY KEY,
+                game_type TEXT NOT NULL,
+                creator_id INTEGER NOT NULL,
+                creator_name TEXT,
+                opponent_id INTEGER,
+                opponent_name TEXT,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER,
+                bet REAL NOT NULL,
+                multiplier REAL NOT NULL,
+                mode TEXT NOT NULL,
+                target_score INTEGER NOT NULL,
+                creator_score INTEGER NOT NULL DEFAULT 0,
+                opponent_score INTEGER NOT NULL DEFAULT 0,
+                creator_roll INTEGER,
+                opponent_roll INTEGER,
+                rolls_this_turn INTEGER NOT NULL DEFAULT 0,
+                current_turn INTEGER,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS claw_packs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pack_name TEXT UNIQUE,
@@ -687,6 +710,71 @@ class Database:
             conn = self.get_db_connection()
             conn.execute("UPDATE deposits SET status=? WHERE track_id=?", (status, track_id))
             conn.commit()
+
+    # --- PvP Methods ---
+    def create_pvp_match(self, match_id: str, game_type: str, creator_id: int, creator_name: str, chat_id: int, message_id: int, bet: float, multiplier: float, mode: str, target_score: int):
+        with self._lock:
+            conn = self._connect()
+            now = datetime.utcnow().isoformat()
+            conn.execute(
+                """
+                INSERT INTO pvp_matches 
+                (match_id, game_type, creator_id, creator_name, chat_id, message_id, bet, multiplier, mode, target_score, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)
+                """,
+                (match_id, game_type, creator_id, creator_name, chat_id, message_id, bet, multiplier, mode, target_score, now, now)
+            )
+            conn.commit()
+
+    def get_pvp_match(self, match_id: str) -> dict | None:
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute("SELECT * FROM pvp_matches WHERE match_id = ?", (match_id,)).fetchone()
+            return dict(row) if row else None
+
+    def get_active_pvp_match(self, user_id: int, chat_id: int) -> dict | None:
+        with self._lock:
+            conn = self._connect()
+            row = conn.execute(
+                "SELECT * FROM pvp_matches WHERE (creator_id = ? OR opponent_id = ?) AND chat_id = ? AND status = 'active'",
+                (user_id, user_id, chat_id)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def update_pvp_match(self, match_id: str, **kwargs):
+        with self._lock:
+            conn = self._connect()
+            kwargs['updated_at'] = datetime.utcnow().isoformat()
+            set_clause = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+            values = list(kwargs.values()) + [match_id]
+            conn.execute(f"UPDATE pvp_matches SET {set_clause} WHERE match_id = ?", values)
+            conn.commit()
+
+    def delete_pvp_match(self, match_id: str):
+        with self._lock:
+            conn = self._connect()
+            conn.execute("DELETE FROM pvp_matches WHERE match_id = ?", (match_id,))
+            conn.commit()
+
+    def get_timeout_pvp_matches(self, waiting_minutes: int, active_minutes: int) -> list[dict]:
+        with self._lock:
+            conn = self._connect()
+            now = datetime.utcnow()
+            # SQLite datetime functions are not always reliable for ISO8601 with python standard library parsing depending on version, 
+            # so we'll fetch them all that are waiting or active and check in python.
+            rows = conn.execute("SELECT * FROM pvp_matches WHERE status IN ('waiting', 'active')").fetchall()
+            
+            expired = []
+            for row in rows:
+                match = dict(row)
+                updated_at = datetime.fromisoformat(match['updated_at'])
+                diff_minutes = (now - updated_at).total_seconds() / 60.0
+                
+                if match['status'] == 'waiting' and diff_minutes > waiting_minutes:
+                    expired.append(match)
+                elif match['status'] == 'active' and diff_minutes > active_minutes:
+                    expired.append(match)
+            return expired
 
     def adjust_user_crypto_balance(self, user_id: int, delta: float) -> None:
         with self._lock:

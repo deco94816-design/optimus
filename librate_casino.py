@@ -5683,11 +5683,82 @@ async def handle_support_callback(update: Update, context: ContextTypes.DEFAULT_
         return
 
 
+async def start_bot_game(query, context, user_id, game_type, bet_amount, mode, points_target, is_demo=False):
+    if game_type not in GAME_CONFIG:
+        await query.answer(t("err_unknown_game", user_id=user_id), show_alert=True)
+        return
+    
+    if user_id in game_sessions:
+        await query.answer(t("err_active_game", user_id=user_id), show_alert=True)
+        return
+    
+    multiplier = MULTIPLIERS.get(mode, 1.92)
+    config = GAME_CONFIG[game_type]
+    
+    # Deduct balance
+    if not is_demo and not is_admin(user_id):
+        balance = get_user_balance(user_id)
+        if balance < bet_amount:
+            await query.edit_message_text(
+                "❌ Insufficient balance! Use /deposit to add Stars.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+        adjust_user_balance(user_id, -bet_amount, game=True)
+        new_balance = get_user_balance(user_id)
+        expected_balance = balance - bet_amount
+        if abs(new_balance - expected_balance) > 0.01:
+            set_user_balance(user_id, expected_balance)
+        user_balances[user_id] = get_user_balance(user_id)
+    
+    # Create session
+    game_sessions[user_id] = {
+        "game_type": game_type,
+        "mode": mode,
+        "points_target": points_target,
+        "player_score": 0,
+        "bot_score": 0,
+        "bet": bet_amount,
+        "multiplier": multiplier,
+        "chat_id": query.message.chat_id,
+        "message_id": query.message.message_id,
+        "is_demo": is_demo,
+        "player_rolls_needed": 2 if mode == "double" else 1,
+        "player_rolls_done": 0,
+        "player_total": 0,
+        "waiting_for_player": True,
+    }
+
+    profile = get_or_create_profile(user_id)
+    display_name = profile.get('display_name') or profile.get('username') or 'Player'
+    user_link = get_user_link(user_id, display_name)
+    bet_usd = bet_amount * STARS_TO_USD
+
+    mode_display = mode.capitalize()
+    if mode == "normal": mode_display = "Normal"
+    elif mode == "double": mode_display = "Double"
+    elif mode == "crazy": mode_display = "Crazy"
+
+    await query.edit_message_text(
+        f"🔹 The game has started\n\n"
+        f"Player 1: {user_link}\n"
+        f"Player 2: 🤖 Librate Game\n"
+        f"Bet: ${bet_usd:.2f}\n"
+        f"Mode: {mode_display} - {points_target} points\n\n"
+        f"Roll the dice {config['emoji']}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=build_copy_turn_reply_markup(user_id, config['emoji'])
+    )
+
 @handle_errors
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     data = query.data
+    if data.startswith("pvp_"):
+        import games.pvp as pvp
+        await pvp.handle_pvp_callback(update, context)
+        return
 
     if data.startswith("deposit_"):
         if data == "deposit_custom":
@@ -7181,16 +7252,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 desc = ""
             
-            keyboard = [
-                [
-                    InlineKeyboardButton("«Accept game»", callback_data=f"play_{game_type}"),
-                ],
-                [
-                    InlineKeyboardButton(t("btn_cancel_game", user_id=user_id), callback_data=f"cancel_{game_type}"),
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
             context.user_data['points_target'] = points_target
             
             demo_tag = " 🔑 DEMO" if is_demo else ""
@@ -7199,16 +7260,70 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             display_name = profile.get('display_name') or profile.get('username') or 'Player'
             user_link = get_user_link(user_id, display_name)
             
+            if is_demo:
+                keyboard = [
+                    [InlineKeyboardButton("«Accept game»", callback_data=f"play_{game_type}")],
+                    [InlineKeyboardButton(t("btn_cancel_game", user_id=user_id), callback_data=f"cancel_{game_type}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                sent_pts = await query.edit_message_text(
+                    f"{config['emoji']} <b>{config['name']}</b>{demo_tag}\n\n"
+                    f"Bet: ${bet_usd:.2f}\n"
+                    f"Multiplier: ×{multiplier}\n"
+                    f"Mode: {mode_display} - First to {points_target} point{'s' if points_target > 1 else ''}\n\n"
+                    f"<i>To accept the challenge from player {user_link}, click «Accept game» to start PvP</i>",
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML
+                )
+                register_menu_owner(sent_pts, user_id)
+                return
+                
+            # --- CREATE PVP MATCH ---
+            import uuid
+            import games.pvp as pvp
+            
+            match_id = str(uuid.uuid4())[:8]
+            
+            # Lock the creator's bet immediately
+            adjust_user_balance(user_id, -bet_amount, game=True)
+            
+            db.create_pvp_match(
+                match_id=match_id,
+                game_type=game_type,
+                creator_id=user_id,
+                creator_name=display_name,
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                bet=bet_amount,
+                multiplier=multiplier,
+                mode=mode,
+                target_score=points_target
+            )
+            
+            keyboard = [
+                [InlineKeyboardButton("🎲 Accept Game", callback_data=f"pvp_accept_{match_id}")],
+                [InlineKeyboardButton("🤖 Play Against Bot", callback_data=f"pvp_bot_{match_id}")],
+                [InlineKeyboardButton("❌ Cancel Game", callback_data=f"pvp_cancel_{match_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            text = pvp.build_challenge_message(game_type, bet_amount, mode, points_target, user_id)
+            
             sent_pts = await query.edit_message_text(
-                f"{config['emoji']} <b>{config['name']}</b>{demo_tag}\n\n"
-                f"Bet: ${bet_usd:.2f}\n"
-                f"Multiplier: ×{multiplier}\n"
-                f"Mode: {mode_display} - First to {points_target} point{'s' if points_target > 1 else ''}\n\n"
-                f"<i>To accept the challenge from player {user_link}, click «Accept game» to start PvP</i>",
+                text,
                 reply_markup=reply_markup,
                 parse_mode=ParseMode.HTML
             )
-            register_menu_owner(sent_pts, user_id)
+            # Do NOT register menu owner, so opponents can click Accept!
+            
+            # Timeout for challenge is 60s
+            context.job_queue.run_once(
+                pvp.pvp_timeout_check, 
+                60, 
+                data={'match_id': match_id},
+                name=f"pvp_timeout_{match_id}"
+            )
             return
         
         # Replay with same settings from last game
@@ -7365,79 +7480,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Play button callback - starts the actual game
         if data.startswith("play_") and not data.startswith("play_game_"):
             game_type = data.replace("play_", "")
-            
-            if game_type not in GAME_CONFIG:
-                await query.answer(t("err_unknown_game", user_id=user_id), show_alert=True)
-                return
-            
-            if user_id in game_sessions:
-                await query.answer(t("err_active_game", user_id=user_id), show_alert=True)
-                return
-            
             bet_amount = context.user_data.get('bet_amount', 10)
             mode = context.user_data.get('mode', 'normal')
             points_target = context.user_data.get('points_target', 1)
             is_demo = context.user_data.get('is_demo', False)
-            multiplier = MULTIPLIERS[mode]
-            config = GAME_CONFIG[game_type]
-            
-            # Deduct balance
-            if not is_demo and not is_admin(user_id):
-                balance = get_user_balance(user_id)
-                if balance < bet_amount:
-                    await query.edit_message_text(
-                        "❌ Insufficient balance! Use /deposit to add Stars.",
-                        parse_mode=ParseMode.HTML
-                    )
-                    return
-                adjust_user_balance(user_id, -bet_amount, game=True)
-                new_balance = get_user_balance(user_id)
-                expected_balance = balance - bet_amount
-                if abs(new_balance - expected_balance) > 0.01:
-                    set_user_balance(user_id, expected_balance)
-                user_balances[user_id] = get_user_balance(user_id)
-            
-            # Create session
-            game_sessions[user_id] = {
-                "game_type": game_type,
-                "mode": mode,
-                "points_target": points_target,
-                "player_score": 0,
-                "bot_score": 0,
-                "bet": bet_amount,
-                "multiplier": multiplier,
-                "chat_id": query.message.chat_id,
-                "message_id": query.message.message_id,
-                "is_demo": is_demo,
-                "player_rolls_needed": 2 if mode == "double" else 1,
-                "player_rolls_done": 0,
-                "player_total": 0,
-                "waiting_for_player": True,
-            }
-
-            # Get display name for start message
-            profile = get_or_create_profile(user_id)
-            display_name = profile.get('display_name') or profile.get('username') or 'Player'
-            user_link = get_user_link(user_id, display_name)
-
-            bet_usd = bet_amount * STARS_TO_USD
-            payout_usd = bet_usd * multiplier
-
-            mode_display = mode.capitalize()
-            if mode == "normal": mode_display = "Normal"
-            elif mode == "double": mode_display = "Double"
-            elif mode == "crazy": mode_display = "Crazy"
-
-            await query.edit_message_text(
-                f"🔹 The game has started\n\n"
-                f"Player 1: {user_link}\n"
-                f"Player 2: 🤖 Librate Game\n"
-                f"Bet: ${bet_usd:.2f}\n"
-                f"Mode: {mode_display} - {points_target} points\n\n"
-                f"Roll the dice {config['emoji']}",
-                parse_mode=ParseMode.HTML,
-                reply_markup=build_copy_turn_reply_markup(user_id, config['emoji'])
-            )
+            await start_bot_game(query, context, user_id, game_type, bet_amount, mode, points_target, is_demo)
             return
         
         # ---- COINFLIP CALLBACKS ----
@@ -9069,6 +9116,15 @@ async def handle_game_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if is_frozen(user_id) and not is_admin(user_id):
+        return
+
+    chat_id = update.effective_chat.id
+    
+    # Check if user is in an active PvP match
+    pvp_match = db.get_active_pvp_match(user_id, chat_id)
+    if pvp_match:
+        import games.pvp as pvp
+        await pvp.handle_pvp_roll(update, context, pvp_match)
         return
 
     session = game_sessions.get(user_id)
